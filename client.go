@@ -845,13 +845,24 @@ func (fs *Share) Chtimes(name string, atime time.Time, mtime time.Time) error {
 		return &os.PathError{Op: "chtimes", Path: name, Err: err}
 	}
 
+	input := &smb2.FileBasicInformationEncoder{}
+	if !atime.IsZero() {
+		input.LastAccessTime = smb2.NsecToFiletime(atime.UnixNano())
+	}
+	if !mtime.IsZero() {
+		input.LastWriteTime = smb2.NsecToFiletime(mtime.UnixNano())
+	}
+	if atime.IsZero() && mtime.IsZero() {
+		if e := f.close(); e != nil {
+			return &os.PathError{Op: "chtimes", Path: name, Err: e}
+		}
+		return nil
+	}
+
 	info := &smb2.SetInfoRequest{
 		FileInfoClass:         smb2.FileBasicInformation,
 		AdditionalInformation: 0,
-		Input: &smb2.FileBasicInformationEncoder{
-			LastAccessTime: smb2.NsecToFiletime(atime.UnixNano()),
-			LastWriteTime:  smb2.NsecToFiletime(mtime.UnixNano()),
-		},
+		Input:                 input,
 	}
 
 	err = f.setInfo(info)

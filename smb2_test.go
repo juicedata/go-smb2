@@ -80,7 +80,7 @@ func connect(f func()) {
 
 		err = json.NewDecoder(cf).Decode(&cfg)
 		if err != nil {
-			fmt.Println("cannot decode client_conf.json")
+			fmt.Println("cannot decode client_conf.json", err)
 			goto NO_CONNECTION
 		}
 
@@ -718,7 +718,7 @@ func TestChmod(t *testing.T) {
 	if stat.Mode() != 0666 {
 		t.Error("unexpected mode:", stat.Mode())
 	}
-	err = f.Chmod(0444)
+	err = f.Chmod(0400) // all read-only mode will map to 0444
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -727,7 +727,7 @@ func TestChmod(t *testing.T) {
 		t.Fatal(err)
 	}
 	if stat.Mode() != 0444 {
-		t.Error("unexpected mode:", stat.Mode())
+		t.Errorf("unexpected mode: %o", stat.Mode())
 	}
 }
 
