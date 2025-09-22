@@ -595,6 +595,30 @@ func TestRename(t *testing.T) {
 		_ = fs.RemoveAll(testDir)
 	}()
 
+	t.Run("exist", func(t *testing.T) {
+		f, err := fs.Create(testDir + `\old`)
+		require.NoError(t, err)
+		_, err = f.Write([]byte("testContent"))
+		require.NoError(t, err)
+		f.Close()
+
+		f2, err := fs.Create(testDir + `\exist`)
+		require.NoError(t, err)
+		_, err = f2.Write([]byte("exist"))
+		require.NoError(t, err)
+		f2.Close()
+
+		err = fs.Rename(testDir+`\old`, testDir+`\exist`)
+		require.NoError(t, err)
+
+		_, err = fs.ReadFile(testDir + `\old`)
+		require.ErrorIs(t, err, os.ErrNotExist)
+
+		data, err := fs.ReadFile(testDir + `\exist`)
+		require.NoError(t, err)
+		require.Equal(t, []byte("testContent"), data)
+	})
+
 	t.Run("move", func(t *testing.T) {
 		f, err := fs.Create(testDir + `\old`)
 		require.NoError(t, err)
