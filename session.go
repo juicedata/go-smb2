@@ -328,7 +328,11 @@ func (s *session) recv(rr *requestResponse) (pkt []byte, err error) {
 	if err != nil {
 		return nil, err
 	}
-	if sessionId := smb2.PacketCodec(pkt).SessionId(); sessionId != s.sessionId {
+	p := smb2.PacketCodec(pkt)
+	if p.IsInvalid() {
+		return nil, &InvalidResponseError{"broken packet header format"}
+	}
+	if sessionId := p.SessionId(); sessionId != s.sessionId {
 		return nil, &InvalidResponseError{fmt.Sprintf("expected session id: %v, got %v", s.sessionId, sessionId)}
 	}
 	return pkt, err
