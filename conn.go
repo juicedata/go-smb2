@@ -93,8 +93,7 @@ func (n *Negotiator) negotiate(t transport, a *account, ctx context.Context) (*c
 		account:             a,
 		rdone:               make(chan struct{}, 1),
 		wdone:               make(chan struct{}, 1),
-		write:               make(chan []byte, 1),
-		werr:                make(chan error, 1),
+		write:               make(chan *writeRequest, 1),
 	}
 
 	go conn.runSender()
@@ -237,6 +236,11 @@ type requestResponse struct {
 	err           error
 }
 
+type writeRequest struct {
+	pkt  []byte
+	done chan error
+}
+
 type outstandingRequests struct {
 	m        sync.Mutex
 	requests map[uint64]*requestResponse
@@ -299,8 +303,7 @@ type conn struct {
 
 	rdone chan struct{}
 	wdone chan struct{}
-	write chan []byte
-	werr  chan error
+	write chan *writeRequest
 
 	m sync.Mutex
 
@@ -364,28 +367,38 @@ func (conn *conn) send(req smb2.Packet, ctx context.Context) (rr *requestRespons
 
 func (conn *conn) sendWith(req smb2.Packet, tc *treeConn, ctx context.Context) (rr *requestResponse, err error) {
 	conn.m.Lock()
-	defer conn.m.Unlock()
 
 	if conn.err != nil {
+		conn.m.Unlock()
+
 		return nil, conn.err
 	}
 
 	select {
 	case <-ctx.Done():
+		conn.m.Unlock()
+
 		return nil, ctx.Err()
 	default:
 		// do nothing
 	}
 
 	rr, err = conn.makeRequestResponse(req, tc, ctx)
+	conn.m.Unlock()
+
 	if err != nil {
 		return nil, err
 	}
 
+	wr := &writeRequest{
+		pkt:  rr.pkt,
+		done: make(chan error, 1),
+	}
+
 	select {
-	case conn.write <- rr.pkt:
+	case conn.write <- wr:
 		select {
-		case err = <-conn.werr:
+		case err = <-wr.done:
 			if err != nil {
 				conn.outstandingRequests.pop(rr.msgId)
 
@@ -395,14 +408,33 @@ func (conn *conn) sendWith(req smb2.Packet, tc *treeConn, ctx context.Context) (
 			conn.outstandingRequests.pop(rr.msgId)
 
 			return nil, ctx.Err()
+		case <-conn.wdone:
+			conn.outstandingRequests.pop(rr.msgId)
+
+			return nil, conn.currentError()
 		}
 	case <-ctx.Done():
 		conn.outstandingRequests.pop(rr.msgId)
 
 		return nil, ctx.Err()
+	case <-conn.wdone:
+		conn.outstandingRequests.pop(rr.msgId)
+
+		return nil, conn.currentError()
 	}
 
 	return rr, nil
+}
+
+func (conn *conn) currentError() error {
+	conn.m.Lock()
+	defer conn.m.Unlock()
+
+	if conn.err != nil {
+		return conn.err
+	}
+
+	return &TransportError{os.ErrClosed}
 }
 
 func (conn *conn) makeRequestResponse(req smb2.Packet, tc *treeConn, ctx context.Context) (rr *requestResponse, err error) {
@@ -486,10 +518,14 @@ func (conn *conn) runSender() {
 		select {
 		case <-conn.wdone:
 			return
-		case pkt := <-conn.write:
-			_, err := conn.t.Write(pkt)
+		case wr := <-conn.write:
+			_, err := conn.t.Write(wr.pkt)
 
-			conn.werr <- err
+			select {
+			case wr.done <- err:
+			default:
+				// Request timed out/canceled while sender was writing.
+			}
 		}
 	}
 }
