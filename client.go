@@ -62,7 +62,7 @@ The returned session doesn't inherit the context. If you want to use the same
 context call Session.WithContext.
 */
 func (d *Dialer) Dial(ctx context.Context, address string) (*Session, error) {
-	conn, err := net.Dial("tcp", address)
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", address)
 	if err != nil {
 		return nil, fmt.Errorf("establishing TCP connection: %w", err)
 	}
@@ -390,7 +390,7 @@ func (fs *Share) OpenFile(name string, flag int, perm os.FileMode) (*File, error
 		access |= smb2.FILE_APPEND_DATA
 	}
 
-	sharemode := uint32(smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE)
+	sharemode := uint32(smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE | smb2.FILE_SHARE_DELETE)
 
 	var createmode uint32
 	switch {
