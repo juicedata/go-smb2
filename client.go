@@ -560,6 +560,10 @@ func (fs *Share) remove(name string) error {
 
 	f, err := fs.createFile(name, req, false)
 	if err != nil {
+		// It is currently in a state of pending deletion, considered successful.
+		if rerr, ok := err.(*ResponseError); ok && erref.NtStatus(rerr.Code) == erref.STATUS_DELETE_PENDING {
+			return nil
+		}
 		return &os.PathError{Op: "remove", Path: name, Err: err}
 	}
 
