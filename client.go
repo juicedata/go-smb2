@@ -62,7 +62,7 @@ The returned session doesn't inherit the context. If you want to use the same
 context call Session.WithContext.
 */
 func (d *Dialer) Dial(ctx context.Context, address string) (*Session, error) {
-	conn, err := net.Dial("tcp", address)
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", address)
 	if err != nil {
 		return nil, fmt.Errorf("establishing TCP connection: %w", err)
 	}
@@ -390,7 +390,7 @@ func (fs *Share) OpenFile(name string, flag int, perm os.FileMode) (*File, error
 		access |= smb2.FILE_APPEND_DATA
 	}
 
-	sharemode := uint32(smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE)
+	sharemode := uint32(smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE | smb2.FILE_SHARE_DELETE)
 
 	var createmode uint32
 	switch {
@@ -448,7 +448,7 @@ func (fs *Share) Mkdir(name string, perm os.FileMode) error {
 		SmbCreateFlags:       0,
 		DesiredAccess:        smb2.FILE_WRITE_ATTRIBUTES,
 		FileAttributes:       smb2.FILE_ATTRIBUTE_NORMAL,
-		ShareAccess:          smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE,
+		ShareAccess:          smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE | smb2.FILE_SHARE_DELETE,
 		CreateDisposition:    smb2.FILE_CREATE,
 		CreateOptions:        smb2.FILE_DIRECTORY_FILE,
 		Mapping:              fs.mapping,
@@ -480,7 +480,7 @@ func (fs *Share) Readlink(name string) (string, error) {
 		SmbCreateFlags:       0,
 		DesiredAccess:        smb2.FILE_READ_ATTRIBUTES,
 		FileAttributes:       smb2.FILE_ATTRIBUTE_NORMAL,
-		ShareAccess:          smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE,
+		ShareAccess:          smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE | smb2.FILE_SHARE_DELETE,
 		CreateDisposition:    smb2.FILE_OPEN,
 		CreateOptions:        smb2.FILE_OPEN_REPARSE_POINT,
 		Mapping:              fs.mapping,
@@ -551,7 +551,7 @@ func (fs *Share) remove(name string) error {
 		SmbCreateFlags:       0,
 		DesiredAccess:        smb2.DELETE,
 		FileAttributes:       0,
-		ShareAccess:          smb2.FILE_SHARE_DELETE,
+		ShareAccess:          smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE | smb2.FILE_SHARE_DELETE,
 		CreateDisposition:    smb2.FILE_OPEN,
 		CreateOptions:        smb2.FILE_OPEN_REPARSE_POINT,
 		Mapping:              fs.mapping,
@@ -560,6 +560,10 @@ func (fs *Share) remove(name string) error {
 
 	f, err := fs.createFile(name, req, false)
 	if err != nil {
+		// It is currently in a state of pending deletion, considered successful.
+		if rerr, ok := err.(*ResponseError); ok && erref.NtStatus(rerr.Code) == erref.STATUS_DELETE_PENDING {
+			return nil
+		}
 		return &os.PathError{Op: "remove", Path: name, Err: err}
 	}
 
@@ -593,7 +597,7 @@ func (fs *Share) Rename(oldpath, newpath string) error {
 		SmbCreateFlags:       0,
 		DesiredAccess:        smb2.DELETE,
 		FileAttributes:       smb2.FILE_ATTRIBUTE_NORMAL,
-		ShareAccess:          smb2.FILE_SHARE_DELETE,
+		ShareAccess:          smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE | smb2.FILE_SHARE_DELETE,
 		CreateDisposition:    smb2.FILE_OPEN,
 		CreateOptions:        smb2.FILE_OPEN_REPARSE_POINT,
 		Mapping:              fs.mapping,
@@ -674,7 +678,7 @@ func (fs *Share) Symlink(target, linkpath string) error {
 		SmbCreateFlags:       0,
 		DesiredAccess:        smb2.FILE_WRITE_ATTRIBUTES | smb2.DELETE,
 		FileAttributes:       smb2.FILE_ATTRIBUTE_REPARSE_POINT,
-		ShareAccess:          smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE,
+		ShareAccess:          smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE | smb2.FILE_SHARE_DELETE,
 		CreateDisposition:    smb2.FILE_CREATE,
 		CreateOptions:        smb2.FILE_OPEN_REPARSE_POINT,
 		Mapping:              fs.mapping,
@@ -725,7 +729,7 @@ func (fs *Share) Lstat(name string) (os.FileInfo, error) {
 		SmbCreateFlags:       0,
 		DesiredAccess:        smb2.FILE_READ_ATTRIBUTES,
 		FileAttributes:       smb2.FILE_ATTRIBUTE_NORMAL,
-		ShareAccess:          smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE,
+		ShareAccess:          smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE | smb2.FILE_SHARE_DELETE,
 		CreateDisposition:    smb2.FILE_OPEN,
 		CreateOptions:        smb2.FILE_OPEN_REPARSE_POINT,
 		Mapping:              fs.mapping,
@@ -760,7 +764,7 @@ func (fs *Share) Stat(name string) (os.FileInfo, error) {
 		SmbCreateFlags:       0,
 		DesiredAccess:        smb2.FILE_READ_ATTRIBUTES,
 		FileAttributes:       smb2.FILE_ATTRIBUTE_NORMAL,
-		ShareAccess:          smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE,
+		ShareAccess:          smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE | smb2.FILE_SHARE_DELETE,
 		CreateDisposition:    smb2.FILE_OPEN,
 		CreateOptions:        0,
 		Mapping:              fs.mapping,
@@ -799,7 +803,7 @@ func (fs *Share) Truncate(name string, size int64) error {
 		SmbCreateFlags:       0,
 		DesiredAccess:        smb2.FILE_WRITE_DATA,
 		FileAttributes:       smb2.FILE_ATTRIBUTE_NORMAL,
-		ShareAccess:          smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE,
+		ShareAccess:          smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE | smb2.FILE_SHARE_DELETE,
 		CreateDisposition:    smb2.FILE_OPEN,
 		CreateOptions:        smb2.FILE_NON_DIRECTORY_FILE | smb2.FILE_SYNCHRONOUS_IO_NONALERT,
 		Mapping:              fs.mapping,
@@ -834,7 +838,7 @@ func (fs *Share) Chtimes(name string, atime time.Time, mtime time.Time) error {
 		SmbCreateFlags:       0,
 		DesiredAccess:        smb2.FILE_WRITE_ATTRIBUTES,
 		FileAttributes:       smb2.FILE_ATTRIBUTE_NORMAL,
-		ShareAccess:          smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE,
+		ShareAccess:          smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE | smb2.FILE_SHARE_DELETE,
 		CreateDisposition:    smb2.FILE_OPEN,
 		CreateOptions:        0,
 		Mapping:              fs.mapping,
@@ -889,7 +893,7 @@ func (fs *Share) Chmod(name string, mode os.FileMode) error {
 		SmbCreateFlags:       0,
 		DesiredAccess:        smb2.FILE_READ_ATTRIBUTES | smb2.FILE_WRITE_ATTRIBUTES,
 		FileAttributes:       smb2.FILE_ATTRIBUTE_NORMAL,
-		ShareAccess:          smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE,
+		ShareAccess:          smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE | smb2.FILE_SHARE_DELETE,
 		CreateDisposition:    smb2.FILE_OPEN,
 		CreateOptions:        0,
 		Mapping:              fs.mapping,
@@ -1002,7 +1006,7 @@ func (fs *Share) Statfs(name string) (FileFsInfo, error) {
 		SmbCreateFlags:       0,
 		DesiredAccess:        smb2.FILE_READ_ATTRIBUTES,
 		FileAttributes:       smb2.FILE_ATTRIBUTE_NORMAL,
-		ShareAccess:          smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE,
+		ShareAccess:          smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE | smb2.FILE_SHARE_DELETE,
 		CreateDisposition:    smb2.FILE_OPEN,
 		CreateOptions:        smb2.FILE_DIRECTORY_FILE,
 		Mapping:              fs.mapping,
@@ -1076,7 +1080,7 @@ func (fs *Share) SecurityInfoRaw(name string, info SecurityInformationRequestFla
 		SmbCreateFlags:       0,
 		DesiredAccess:        access,
 		FileAttributes:       smb2.FILE_ATTRIBUTE_NORMAL,
-		ShareAccess:          smb2.FILE_SHARE_READ,
+		ShareAccess:          smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE | smb2.FILE_SHARE_DELETE,
 		CreateDisposition:    smb2.FILE_OPEN,
 		CreateOptions:        0,
 		Mapping:              fs.mapping,
@@ -1126,7 +1130,7 @@ func (fs *Share) SetSecurityInfoRaw(name string, flags SecurityInformationReques
 		SmbCreateFlags:       0,
 		DesiredAccess:        access,
 		FileAttributes:       smb2.FILE_ATTRIBUTE_NORMAL,
-		ShareAccess:          smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE,
+		ShareAccess:          smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE | smb2.FILE_SHARE_DELETE,
 		CreateDisposition:    smb2.FILE_OPEN,
 		CreateOptions:        0,
 		Mapping:              fs.mapping,
